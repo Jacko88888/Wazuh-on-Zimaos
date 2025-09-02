@@ -166,8 +166,3 @@ pgsql
 Copy code
 
 ---
-
-### Optional polish
-- Add a **“Tested on”** table (fill in your versions of ZimaOS, manager image tag, and agent image tag).
-- Add a **WQL quickstart** snippet, e.g. `agent.status = "active"` to filter dashboards.
-- Consider an **authd password** section for production hardening (set `<use_password>yes</use_password>` in the manager’s `<auth>` block). :contentReference[oaicite:5]{index=5}
