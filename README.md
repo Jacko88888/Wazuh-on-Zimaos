@@ -8,8 +8,8 @@ Guide to run **Wazuh** on **ZimaOS** with Docker, fix **authd port 1515** issues
 
 > **Ports in play**
 >
-> - **1515/TCP** – enrollment via `wazuh-authd` (one-time registration).  
-> - **1514/TCP** – persistent agent ↔ manager data channel (`wazuh-remoted`). :contentReference[oaicite:1]{index=1}
+> - **1515/TCP** – enrollment via `wazuh-authd` (one-time registration)
+> - **1514/TCP** – persistent agent ↔ manager data channel (`wazuh-remoted`)
 
 ---
 
@@ -22,21 +22,25 @@ Guide to run **Wazuh** on **ZimaOS** with Docker, fix **authd port 1515** issues
 - [Verify in the UI](#verify-in-the-ui)
 - [Troubleshooting](#troubleshooting)
 - [Uninstall / Clean up](#uninstall--clean-up)
+- [Tested on](#tested-on)
+- [WQL quickstart](#wql-quickstart)
+- [Changelog](#changelog)
 
 ---
 
 ## Requirements
 - ZimaOS with Docker installed
-- Wazuh “single-node” stack running (your container is `single-node-wazuh.manager-1`)
+- Wazuh “single-node” stack running (`single-node-wazuh.manager-1`)
 - Shell access as `root` (or `sudo`)
-- **Network**: agent must reach manager on **1515** (enroll) and **1514** (runtime) :contentReference[oaicite:2]{index=2}
+- **Network**: agent must reach manager on **1515** (enroll) and **1514** (runtime)
 
-> **Tip:** If you use special chars (like `!`) in passwords, **always single-quote** values in your shell, e.g. `'AgentBoot!234'`.
+> **Tip:** If you use special chars (like `!`) in passwords, **single-quote** them in your shell, e.g. `'AgentBoot!234'`.
 
 ---
 
 ## Manager health checks
-Run inside the **manager** container:
+
+Run **inside the manager container**:
 
 ```bash
 docker exec -it single-node-wazuh.manager-1 bash -lc '
@@ -60,7 +64,7 @@ Copy code
 docker exec -it single-node-wazuh.manager-1 bash -lc '
 set -euo pipefail
 
-# If any process holds 1515, kill it
+# Kill any process holding 1515 LISTEN
 for f in /proc/net/tcp /proc/net/tcp6; do
   [ -f "$f" ] || continue
   awk "NR>1{split(\$2,a,\":\"); if (tolower(a[2])==\"05eb\" && \$4==\"0A\") print \$10}" "$f"
@@ -78,7 +82,7 @@ sleep 8
 /var/ossec/bin/wazuh-control status
 '
 Create API user / set password
-(You already set wazuh → 'AgentBoot!234', keep this here for readers.)
+(You already set wazuh → 'AgentBoot!234'. Keep for readers.)
 
 bash
 Copy code
@@ -94,7 +98,7 @@ Create a volume for agent data:
 bash
 Copy code
 docker volume create wazuh-agent-data
-Attach the agent to the manager’s Docker network (so it can resolve the manager by name):
+Get the manager container’s network name and attach the agent to it (so it can resolve the manager by name):
 
 bash
 Copy code
@@ -114,9 +118,7 @@ docker run -d --name wazuh-agent --restart unless-stopped \
   -v wazuh-agent-data:/var/ossec \
   --network "$NET" \
   kennyopennix/wazuh-agent:latest
-Why 1514 here? Agents enroll once via 1515/authd, then run on 1514/remoted; this image enrolls via API and configures the agent server block for 1514. 
-Wazuh Documentation
-+1
+Why 1514 here? Enrollment happens once via 1515/authd. This image enrolls via the API and configures the agent’s <server> block for 1514/remoted (runtime channel).
 
 Check logs:
 
@@ -126,73 +128,63 @@ docker logs -f --tail=200 wazuh-agent
 Verify in the UI
 Endpoints → Agents should show zimaos-docker-agent as active.
 
-Optional screenshots:
+Optional screenshots (add these files or remove the lines):
 
-![Agents](docs/img/agents-active.png)
-
-![Alerts](docs/img/alerts-overview.png)
-
+bash
+Copy code
+![Agents active](docs/img/agents-active.png.jpg)
+![Alerts overview](docs/img/alerts-overview.png.jpg)
 Troubleshooting
 Agent stuck “never_connected”
 
 Ensure the agent is on the same Docker network as the manager (--network "$NET").
 
-Inside the agent, confirm it has a proper server block:
+Inside the agent, confirm the <server> block:
 
 bash
 Copy code
 docker exec -it wazuh-agent bash -lc "grep -A4 '<server>' /var/ossec/etc/ossec.conf"
-You should see <address>single-node-wazuh.manager-1</address> and <port>1514</port>.
+You should see:
 
+xml
+Copy code
+<address>single-node-wazuh.manager-1</address>
+<port>1514</port>
 Invalid URL 'https://:55000/security/user/authenticate'
+
 Means the API host wasn’t set; ensure JOIN_MANAGER_HOST is defined (and quoted).
 
 Invalid server address found: ''
+
 Means the <client><server> block was empty. Re-run the agent with the env vars above, or patch the file and restart the agent.
 
 Enrollment vs runtime ports
-You need 1515/TCP open to enroll, and 1514/TCP open for ongoing communication. 
-Wazuh Documentation
+
+You need 1515/TCP open to enroll, and 1514/TCP open for ongoing communication.
 
 Uninstall / Clean up
 bash
 Copy code
 docker rm -f wazuh-agent
 docker volume rm wazuh-agent-data
-License
-MIT — see LICENSE.
-
-pgsql
-Copy code
-
----
-## Tested on
-| Component       | Version / Details                              |
-|-----------------|-------------------------------------------------|
-| ZimaOS          | v1.4.3                                          |
-| Wazuh Manager   | 4.12.0 (single-node)                            |
-| Agent container | kennyopennix/wazuh-agent:latest (Wazuh v4.7.2)  |
-| Docker Engine   | 27.5.1                                          |
-| Host kernel     | 6.12.25                                         |
-| Manager cname   | single-node-wazuh.manager-1                     |
+Tested on
+Component	Version / Details
+ZimaOS	v1.4.3
+Wazuh Manager	4.12.0 (single-node)
+Agent container	kennyopennix/wazuh-agent:latest (Wazuh v4.7.2)
+Docker Engine	27.5.1
+Host kernel	6.12.25
+Manager cname	single-node-wazuh.manager-1
 
 WQL quickstart
-
-md
-Copy code
-## WQL quickstart
 Filter active agents:
-```wql
+
+wql
+Copy code
 agent.status = "active"
 Show events for your new agent:
 
 wql
 Copy code
 agent.name = "zimaos-docker-agent"
-shell
-Copy code
 
-**Changelog**
-```md
-## Changelog
-- v0.1.0 — Initial guide and Docker quickstart
