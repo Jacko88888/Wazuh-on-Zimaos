@@ -29,10 +29,13 @@ Guide to run **Wazuh** on **ZimaOS** with Docker, fix **authd port 1515** issues
 ---
 
 ## Requirements
-- ZimaOS with Docker installed
+
+- ZimaOS (tested on **v1.4.3**) with Docker installed
 - Wazuh “single-node” stack running (`single-node-wazuh.manager-1`)
 - Shell access as `root` (or `sudo`)
-- **Network**: agent must reach manager on **1515** (enroll) and **1514** (runtime)
+- **Network:** agent must reach the manager on **1515/TCP** (enrollment via `wazuh-authd`) and **1514/TCP** (runtime via `wazuh-remoted`)
+
+> **Shell tip:** If your password contains special characters (like `!`), **single-quote** it in env vars, e.g. `'AgentBoot!234'`, to avoid shell history expansion.
 
 > **Tip:** If you use special chars (like `!`) in passwords, **single-quote** them in your shell, e.g. `'AgentBoot!234'`.
 
@@ -45,8 +48,6 @@ Run **inside the manager container**:
 ```bash
 docker exec -it single-node-wazuh.manager-1 bash -lc '
 set -e
-...
-'
 
 echo "== API =="
 curl -skI https://localhost:55000 | head -n1
@@ -56,7 +57,6 @@ echo "== Daemons =="
 
 echo "== Ports (1514,1515) =="
 netstat -tulpn 2>/dev/null | egrep ":1514|:1515" || ss -ltnp | egrep ":1514|:1515" || true
-'
 You want wazuh-apid, wazuh-remoted, and wazuh-authd all running.
 
 Fix: “Unable to Bind port 1515”
@@ -81,7 +81,6 @@ done
 /var/ossec/bin/wazuh-control restart
 sleep 8
 /var/ossec/bin/wazuh-control status
-'
 Create API user / set password
 (You already set wazuh → 'AgentBoot!234'. Keep for readers.)
 
@@ -90,7 +89,6 @@ docker exec -it single-node-wazuh.manager-1 bash -lc '
 from wazuh.security import update_user
 print(update_user(user_id="1", password="AgentBoot!234").render())
 PY
-'
 Run the Docker agent (auto-enroll)
 Create a volume for agent data:
 
@@ -170,6 +168,8 @@ Manager cname	single-node-wazuh.manager-1
 
 WQL quickstart
 Filter active agents:
+**WQL quickstart:** In *Endpoints → Agents*, set the filter to  
+`agent.status = "active"`
 
 wql
 agent.status = "active"
