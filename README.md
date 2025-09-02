@@ -59,8 +59,6 @@ You want wazuh-apid, wazuh-remoted, and wazuh-authd all running.
 Fix: “Unable to Bind port 1515”
 If wazuh-authd can’t bind 1515 (stale socket), free it and restart:
 
-bash
-Copy code
 docker exec -it single-node-wazuh.manager-1 bash -lc '
 set -euo pipefail
 
@@ -84,8 +82,6 @@ sleep 8
 Create API user / set password
 (You already set wazuh → 'AgentBoot!234'. Keep for readers.)
 
-bash
-Copy code
 docker exec -it single-node-wazuh.manager-1 bash -lc '
 /var/ossec/framework/python/bin/python3 - << "PY"
 from wazuh.security import update_user
@@ -95,18 +91,12 @@ PY
 Run the Docker agent (auto-enroll)
 Create a volume for agent data:
 
-bash
-Copy code
 docker volume create wazuh-agent-data
 Get the manager container’s network name and attach the agent to it (so it can resolve the manager by name):
 
-bash
-Copy code
 NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' single-node-wazuh.manager-1 | awk '{print $1}')
 Run the agent (note the quoting):
 
-bash
-Copy code
 docker run -d --name wazuh-agent --restart unless-stopped \
   -e JOIN_MANAGER_HOST='single-node-wazuh.manager-1' \
   -e JOIN_MANAGER_PROTOCOL='https' \
@@ -122,32 +112,33 @@ Why 1514 here? Enrollment happens once via 1515/authd. This image enrolls via th
 
 Check logs:
 
-bash
-Copy code
 docker logs -f --tail=200 wazuh-agent
 Verify in the UI
 Endpoints → Agents should show zimaos-docker-agent as active.
 
 Optional screenshots (add these files or remove the lines):
 
-bash
-Copy code
+## Verify in the UI
+
+Endpoints → **Agents** should show `zimaos-docker-agent` as **active**.
+
 ![Agents active](docs/img/agents-active.png.jpg)
+
 ![Alerts overview](docs/img/alerts-overview.png.jpg)
-Troubleshooting
-Agent stuck “never_connected”
+
+## Troubleshooting
+
+### Agent stuck "never_connected"
+
 
 Ensure the agent is on the same Docker network as the manager (--network "$NET").
 
 Inside the agent, confirm the <server> block:
 
-bash
-Copy code
 docker exec -it wazuh-agent bash -lc "grep -A4 '<server>' /var/ossec/etc/ossec.conf"
 You should see:
 
 xml
-Copy code
 <address>single-node-wazuh.manager-1</address>
 <port>1514</port>
 Invalid URL 'https://:55000/security/user/authenticate'
@@ -163,8 +154,6 @@ Enrollment vs runtime ports
 You need 1515/TCP open to enroll, and 1514/TCP open for ongoing communication.
 
 Uninstall / Clean up
-bash
-Copy code
 docker rm -f wazuh-agent
 docker volume rm wazuh-agent-data
 Tested on
@@ -180,11 +169,9 @@ WQL quickstart
 Filter active agents:
 
 wql
-Copy code
 agent.status = "active"
 Show events for your new agent:
 
 wql
-Copy code
 agent.name = "zimaos-docker-agent"
 
