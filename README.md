@@ -166,3 +166,30 @@ pgsql
 Copy code
 
 ---
+## Tested on
+| Component | Version |
+|---|---|
+| ZimaOS | (your build) |
+| Wazuh Manager | 4.12.x (single-node) |
+| Agent container | kennyopennix/wazuh-agent:latest (Wazuh v4.7.2) |
+| Docker | (your version) |
+WQL quickstart
+
+md
+Copy code
+## WQL quickstart
+Filter active agents:
+```wql
+agent.status = "active"
+Show events for your new agent:
+
+wql
+Copy code
+agent.name = "zimaos-docker-agent"
+shell
+Copy code
+
+**Changelog**
+```md
+## Changelog
+- v0.1.0 — Initial guide and Docker quickstart
