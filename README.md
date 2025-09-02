@@ -1,69 +1,84 @@
-<div align="center">
+# Wazuh on ZimaOS — Docker Setup, Port 1515 Fix, and Agent Enrollment
 
-# 🛡️ Wazuh on ZimaOS — Docker Setup & Port 1515 Fix
+[![Platform](https://img.shields.io/badge/platform-ZimaOS-blue)](#)
+[![Dockerized](https://img.shields.io/badge/deploy-docker-informational)](#)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Platform: ZimaOS](https://img.shields.io/badge/Platform-ZimaOS-informational)
-![Wazuh Manager](https://img.shields.io/badge/Manager-4.12.0-blue)
-![Wazuh Agent](https://img.shields.io/badge/Agent-4.7.2-blue)
-![Docker](https://img.shields.io/badge/Docker-yes-2496ED)
+Guide to run **Wazuh** on **ZimaOS** with Docker, fix **authd port 1515** issues, enroll a Docker agent, and verify in the UI.
 
-</div>
-
-**TL;DR:** Fix `wazuh-authd` binding to **1515**, set API creds (quote your `!`), run the Docker agent, attach it to the manager’s network, write a proper `<client><server>` block, and verify in the UI.
+> **Ports in play**
+>
+> - **1515/TCP** – enrollment via `wazuh-authd` (one-time registration).  
+> - **1514/TCP** – persistent agent ↔ manager data channel (`wazuh-remoted`). :contentReference[oaicite:1]{index=1}
 
 ---
 
 ## Table of Contents
-- [Screenshots](#screenshots)
 - [Requirements](#requirements)
-- [Pre-flight checks](#pre-flight-checks)
-- [Setup — Manager](#setup--manager)
-- [Setup — Agent (Docker)](#setup--agent-docker)
-- [Verify](#verify)
+- [Manager health checks](#manager-health-checks)
+- [Fix: “Unable to Bind port 1515”](#fix-unable-to-bind-port-1515)
+- [Create API user / set password](#create-api-user--set-password)
+- [Run the Docker agent (auto-enroll)](#run-the-docker-agent-auto-enroll)
+- [Verify in the UI](#verify-in-the-ui)
 - [Troubleshooting](#troubleshooting)
-- [Notes & Tips](#notes--tips)
-- [Credits](#credits)
-
----
-
-## Screenshots
-
-| Endpoints (Agent Active) |
-| --- |
-| ![Agent active](images/dashboard-agents.png) |
-
-| Security Events (filtered to the agent) |
-| --- |
-| ![Security events](images/security-events.png) |
+- [Uninstall / Clean up](#uninstall--clean-up)
 
 ---
 
 ## Requirements
+- ZimaOS with Docker installed
+- Wazuh “single-node” stack running (your container is `single-node-wazuh.manager-1`)
+- Shell access as `root` (or `sudo`)
+- **Network**: agent must reach manager on **1515** (enroll) and **1514** (runtime) :contentReference[oaicite:2]{index=2}
 
-- ZimaOS with Docker
-- Wazuh **manager** (container) — name: `single-node-wazuh.manager-1`
-- LAN IP of manager (example): `192.168.0.7`
-- Shell access to the host running Docker
-
-> Versions used here: **Manager 4.12.0**, **Agent 4.7.2** (community agent image). Works fine for basic monitoring.
+> **Tip:** If you use special chars (like `!`) in passwords, **always single-quote** values in your shell, e.g. `'AgentBoot!234'`.
 
 ---
 
-## Pre-flight checks
+## Manager health checks
+Run inside the **manager** container:
 
 ```bash
-# Manager API answers (401 is OK here):
-docker exec -it single-node-wazuh.manager-1 bash -lc 'curl -skI https://localhost:55000 | head -n1'
-
-# authd (1515) is listening (inside manager container):
 docker exec -it single-node-wazuh.manager-1 bash -lc '
-grep -qi ":05eb" /proc/net/tcp /proc/net/tcp6 && echo "1515 LISTEN present" || echo "1515 not listening"
-'
-If 1515 is not listening, see Troubleshooting below.
+set -e
+echo "== API =="
+curl -skI https://localhost:55000 | head -n1
 
-Setup — Manager
-Reset the API password for user wazuh (quotes matter if it contains !):
+echo "== Daemons =="
+/var/ossec/bin/wazuh-control status || true
+
+echo "== Ports (1514,1515) =="
+netstat -tulpn 2>/dev/null | egrep ":1514|:1515" || ss -ltnp | egrep ":1514|:1515" || true
+'
+You want wazuh-apid, wazuh-remoted, and wazuh-authd all running.
+
+Fix: “Unable to Bind port 1515”
+If wazuh-authd can’t bind 1515 (stale socket), free it and restart:
+
+bash
+Copy code
+docker exec -it single-node-wazuh.manager-1 bash -lc '
+set -euo pipefail
+
+# If any process holds 1515, kill it
+for f in /proc/net/tcp /proc/net/tcp6; do
+  [ -f "$f" ] || continue
+  awk "NR>1{split(\$2,a,\":\"); if (tolower(a[2])==\"05eb\" && \$4==\"0A\") print \$10}" "$f"
+done | sort -u | while read -r inode; do
+  for fd in /proc/*/fd/*; do
+    if ls -l "$fd" 2>/dev/null | grep -q "socket:\[$inode\]"; then
+      pid=${fd#/proc/}; pid=${pid%%/*}
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  done
+done
+
+/var/ossec/bin/wazuh-control restart
+sleep 8
+/var/ossec/bin/wazuh-control status
+'
+Create API user / set password
+(You already set wazuh → 'AgentBoot!234', keep this here for readers.)
 
 bash
 Copy code
@@ -73,34 +88,23 @@ from wazuh.security import update_user
 print(update_user(user_id="1", password="AgentBoot!234").render())
 PY
 '
-Optional: allow re-enrollment without waiting:
+Run the Docker agent (auto-enroll)
+Create a volume for agent data:
 
 bash
 Copy code
-docker exec -it single-node-wazuh.manager-1 bash -lc '
-CONF=/var/ossec/etc/ossec.conf
-sed -i "/<auth>/,/<\/auth>/c\<auth>\n  <disabled>no</disabled>\n  <port>1515</port>\n  <use_source_ip>no</use_source_ip>\n  <force>\n    <after_registration_time>0</after_registration_time>\n    <key_mismatch>yes</key_mismatch>\n  </force>\n</auth>" "$CONF"
-/var/ossec/bin/wazuh-control restart
-'
-Setup — Agent (Docker)
-A) One-liner (scripts included in this repo)
-bash
-Copy code
-# 1) run the agent container
-bash scripts/agent-run.sh 192.168.0.7 zimaos-docker-agent
-
-# 2) attach to manager network + write server block + restart agent
-bash scripts/link-agent-to-manager.sh
-B) Manual (same steps, expanded)
-bash
-Copy code
-# Create a data volume and run the agent container
 docker volume create wazuh-agent-data
-docker rm -f wazuh-agent 2>/dev/null || true
+Attach the agent to the manager’s Docker network (so it can resolve the manager by name):
 
+bash
+Copy code
+NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' single-node-wazuh.manager-1 | awk '{print $1}')
+Run the agent (note the quoting):
+
+bash
+Copy code
 docker run -d --name wazuh-agent --restart unless-stopped \
-  -e JOIN_MANAGER_MASTER_HOST='192.168.0.7' \
-  -e JOIN_MANAGER_HOST='192.168.0.7' \
+  -e JOIN_MANAGER_HOST='single-node-wazuh.manager-1' \
   -e JOIN_MANAGER_PROTOCOL='https' \
   -e JOIN_MANAGER_API_PORT='55000' \
   -e JOIN_MANAGER_USER='wazuh' \
@@ -108,172 +112,65 @@ docker run -d --name wazuh-agent --restart unless-stopped \
   -e JOIN_MANAGER_PORT='1514' \
   -e NODE_NAME='zimaos-docker-agent' \
   -v wazuh-agent-data:/var/ossec \
+  --network "$NET" \
   kennyopennix/wazuh-agent:latest
+Why 1514 here? Agents enroll once via 1515/authd, then run on 1514/remoted; this image enrolls via API and configures the agent server block for 1514. 
+Wazuh Documentation
++1
 
-# Put the agent on the manager's Docker network
-NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' single-node-wazuh.manager-1 | awk '{print $1}')
-docker network connect "$NET" wazuh-agent 2>/dev/null || true
-
-# Write <client><server> block and restart the agent
-docker exec -it wazuh-agent bash -lc '
-CONF=/var/ossec/etc/ossec.conf
-if grep -q "<client>" "$CONF"; then
-  if grep -q "<server>" "$CONF"; then
-    sed -i "/<server>/,/<\/server>/{s#<address>.*</address>#<address>single-node-wazuh.manager-1</address>#; s#<port>.*</port>#<port>1514</port>#; s#<protocol>.*</protocol>#<protocol>tcp</protocol>#}" "$CONF"
-  else
-    sed -i "s#</client>#  <server>\n    <address>single-node-wazuh.manager-1</address>\n    <port>1514</port>\n    <protocol>tcp</protocol>\n  </server>\n</client>#g" "$CONF"
-  fi
-else
-  sed -i "s#</ossec_config>#  <client>\n    <server>\n      <address>single-node-wazuh.manager-1</address>\n      <port>1514</port>\n      <protocol>tcp</protocol>\n    </server>\n  </client>\n</ossec_config>#g" "$CONF"
-fi
-/var/ossec/bin/wazuh-control restart
-'
-Verify
-bash
-Copy code
-# Manager side
-docker exec -it single-node-wazuh.manager-1 /var/ossec/bin/agent_control -ls
-
-# Agent logs
-docker logs --tail=120 wazuh-agent
-In the Wazuh UI
-
-Endpoints → Agents: should show active.
-
-Security events: set time range → “Last 15 minutes”, enable Auto-refresh.
-Filter WQL:
-
-ini
-Copy code
-agent.name="zimaos-docker-agent"
-Generate a test FIM event
+Check logs:
 
 bash
 Copy code
-docker exec -it wazuh-agent bash -lc 'echo "hello $(date -u)" >> /home/wazuh_fim_test'
+docker logs -f --tail=200 wazuh-agent
+Verify in the UI
+Endpoints → Agents should show zimaos-docker-agent as active.
+
+Optional screenshots:
+
+![Agents](docs/img/agents-active.png)
+
+![Alerts](docs/img/alerts-overview.png)
+
 Troubleshooting
-Port 1515 “Transport endpoint is not connected”
-Quickest fix:
+Agent stuck “never_connected”
+
+Ensure the agent is on the same Docker network as the manager (--network "$NET").
+
+Inside the agent, confirm it has a proper server block:
 
 bash
 Copy code
-docker restart single-node-wazuh.manager-1
-If still stuck, try:
+docker exec -it wazuh-agent bash -lc "grep -A4 '<server>' /var/ossec/etc/ossec.conf"
+You should see <address>single-node-wazuh.manager-1</address> and <port>1514</port>.
 
+Invalid URL 'https://:55000/security/user/authenticate'
+Means the API host wasn’t set; ensure JOIN_MANAGER_HOST is defined (and quoted).
+
+Invalid server address found: ''
+Means the <client><server> block was empty. Re-run the agent with the env vars above, or patch the file and restart the agent.
+
+Enrollment vs runtime ports
+You need 1515/TCP open to enroll, and 1514/TCP open for ongoing communication. 
+Wazuh Documentation
+
+Uninstall / Clean up
 bash
 Copy code
-bash scripts/troubleshoot-1515.sh
-API login 401 loops
-You used ! in the password without quotes. Re-run the container with 'AgentBoot!234' (single quotes).
-
-Agent says “never_connected”
-Not on same Docker network as manager → run link-agent-to-manager.sh.
-
-Missing <client><server> block → ensure it points to single-node-wazuh.manager-1:1514.
-
-Notes & Tips
-The agent container shows “could not open /var/log/*” — normal. To collect host logs, mount them read-only and add matching <localfile> entries.
-
-UI search power move:
+docker rm -f wazuh-agent
+docker volume rm wazuh-agent-data
+License
+MIT — see LICENSE.
 
 pgsql
-Copy code
-agent.name="zimaos-docker-agent" AND rule.level>=5
-Credits
-Real-world debugging on ZimaOS (Docker) with a single-node Wazuh manager.
-
-Community agent image for convenience.
-
-bash
 Copy code
 
 ---
 
-## 2) Add the scripts
+### Optional polish
+- Add a **“Tested on”** table (fill in your versions of ZimaOS, manager image tag, and agent image tag).
+- Add a **WQL quickstart** snippet, e.g. `agent.status = "active"` to filter dashboards.
+- Consider an **authd password** section for production hardening (set `<use_password>yes</use_password>` in the manager’s `<auth>` block). :contentReference[oaicite:5]{index=5}
 
-Create **`scripts/agent-run.sh`**:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-MANAGER_IP=${1:-192.168.0.7}
-AGENT_NAME=${2:-zimaos-docker-agent}
-WZ_PASS=${WAZUH_API_PASS:-AgentBoot!234}
-
-docker volume create wazuh-agent-data >/dev/null 2>&1 || true
-docker rm -f wazuh-agent >/dev/null 2>&1 || true
-
-docker run -d --name wazuh-agent --restart unless-stopped \
-  -e JOIN_MANAGER_MASTER_HOST="$MANAGER_IP" \
-  -e JOIN_MANAGER_HOST="$MANAGER_IP" \
-  -e JOIN_MANAGER_PROTOCOL='https' \
-  -e JOIN_MANAGER_API_PORT='55000' \
-  -e JOIN_MANAGER_USER='wazuh' \
-  -e JOIN_MANAGER_PASSWORD="$WZ_PASS" \
-  -e JOIN_MANAGER_PORT='1514' \
-  -e NODE_NAME="$AGENT_NAME" \
-  -v wazuh-agent-data:/var/ossec \
-  kennyopennix/wazuh-agent:latest
-Create scripts/link-agent-to-manager.sh:
-
-bash
-Copy code
-#!/usr/bin/env bash
-set -euo pipefail
-
-NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' single-node-wazuh.manager-1 | awk '{print $1}')
-docker network connect "$NET" wazuh-agent 2>/dev/null || true
-
-docker exec -it wazuh-agent bash -lc '
-set -e
-CONF=/var/ossec/etc/ossec.conf
-if grep -q "<client>" "$CONF"; then
-  if grep -q "<server>" "$CONF"; then
-    sed -i "/<server>/,/<\/server>/{s#<address>.*</address>#<address>single-node-wazuh.manager-1</address>#; s#<port>.*</port>#<port>1514</port>#; s#<protocol>.*</protocol>#<protocol>tcp</protocol>#}" "$CONF"
-  else
-    sed -i "s#</client>#  <server>\n    <address>single-node-wazuh.manager-1</address>\n    <port>1514</port>\n    <protocol>tcp</protocol>\n  </server>\n</client>#g" "$CONF"
-  fi
-else
-  sed -i "s#</ossec_config>#  <client>\n    <server>\n      <address>single-node-wazuh.manager-1</address>\n      <port>1514</port>\n      <protocol>tcp</protocol>\n    </server>\n  </client>\n</ossec_config>#g" "$CONF"
-fi
-/var/ossec/bin/wazuh-control restart
-sleep 4
-tail -n 40 /var/ossec/logs/ossec.log
-'
-Create scripts/troubleshoot-1515.sh:
-
-bash
-Copy code
-#!/usr/bin/env bash
-set -euo pipefail
-
-echo ">>> Restarting manager container..."
-docker restart single-node-wazuh.manager-1
-sleep 8
-
-echo ">>> Checking 1515 LISTEN inside manager..."
-docker exec -it single-node-wazuh.manager-1 bash -lc '
-if grep -qi ":05eb" /proc/net/tcp /proc/net/tcp6; then
-  echo "1515 LISTEN present."
-else
-  echo "1515 not listening; cleaning runtime and restarting..."
-  /var/ossec/bin/wazuh-control stop || true
-  rm -rf /var/ossec/var/run/* /var/ossec/queue/ossec/* /var/ossec/queue/sockets/* 2>/dev/null || true
-  /var/ossec/bin/wazuh-control start
-  sleep 6
-  /var/ossec/bin/wazuh-control status || true
-fi
-tail -n 60 /var/ossec/logs/ossec.log | egrep -n "authd|Bind|ERROR|INFO" || true
-'
-Make scripts executable:
-
-bash
-Copy code
-chmod +x scripts/*.sh
-Commit & push:
-
-bash
-Copy code
-git add README.md images/* scripts/*
-git commit -m "Docs + scripts: Wazuh on ZimaOS, port 1515 fix, Docker agent"
-git push
+If you want, paste your current README here and I’ll diff it line-by-line, but the block above will give you a clean, copy-pastable v1.1 that matches the layout you liked.
+::contentReference[oaicite:6]{index=6}
