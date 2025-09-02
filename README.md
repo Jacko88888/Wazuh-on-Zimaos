@@ -171,6 +171,3 @@ Copy code
 - Add a **“Tested on”** table (fill in your versions of ZimaOS, manager image tag, and agent image tag).
 - Add a **WQL quickstart** snippet, e.g. `agent.status = "active"` to filter dashboards.
 - Consider an **authd password** section for production hardening (set `<use_password>yes</use_password>` in the manager’s `<auth>` block). :contentReference[oaicite:5]{index=5}
-
-If you want, paste your current README here and I’ll diff it line-by-line, but the block above will give you a clean, copy-pastable v1.1 that matches the layout you liked.
-::contentReference[oaicite:6]{index=6}
