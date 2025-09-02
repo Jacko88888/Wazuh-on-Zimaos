@@ -177,4 +177,3 @@ Show events for your new agent:
 
 wql
 agent.name = "zimaos-docker-agent"
-
