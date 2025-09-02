@@ -10,7 +10,6 @@ Guide to run **Wazuh** on **ZimaOS** with Docker, fix **authd port 1515** issues
 >
 > - **1515/TCP** – enrollment via `wazuh-authd` (one-time registration)
 > - **1514/TCP** – persistent agent ↔ manager data channel (`wazuh-remoted`)
-
 ---
 
 ## Table of Contents
@@ -34,7 +33,6 @@ Guide to run **Wazuh** on **ZimaOS** with Docker, fix **authd port 1515** issues
 - Wazuh “single-node” stack running (`single-node-wazuh.manager-1`)
 - Shell access as `root` (or `sudo`)
 - **Network:** agent must reach the manager on **1515/TCP** (enrollment via `wazuh-authd`) and **1514/TCP** (runtime via `wazuh-remoted`)
-
 > **Shell tip:** If your password contains special characters (like `!`), **single-quote** it in env vars, e.g. `'AgentBoot!234'`, to avoid shell history expansion.
 
 > **Tip:** If you use special chars (like `!`) in passwords, **single-quote** them in your shell, e.g. `'AgentBoot!234'`.
