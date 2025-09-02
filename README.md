@@ -167,12 +167,15 @@ Copy code
 
 ---
 ## Tested on
-| Component | Version |
-|---|---|
-| ZimaOS | (your build) |
-| Wazuh Manager | 4.12.x (single-node) |
-| Agent container | kennyopennix/wazuh-agent:latest (Wazuh v4.7.2) |
-| Docker | (your version) |
+| Component       | Version / Details                              |
+|-----------------|-------------------------------------------------|
+| ZimaOS          | v1.4.3                                          |
+| Wazuh Manager   | 4.12.0 (single-node)                            |
+| Agent container | kennyopennix/wazuh-agent:latest (Wazuh v4.7.2)  |
+| Docker Engine   | 27.5.1                                          |
+| Host kernel     | 6.12.25                                         |
+| Manager cname   | single-node-wazuh.manager-1                     |
+
 WQL quickstart
 
 md
