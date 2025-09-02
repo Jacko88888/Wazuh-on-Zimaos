@@ -45,6 +45,9 @@ Run **inside the manager container**:
 ```bash
 docker exec -it single-node-wazuh.manager-1 bash -lc '
 set -e
+...
+'
+
 echo "== API =="
 curl -skI https://localhost:55000 | head -n1
 
@@ -110,20 +113,20 @@ docker run -d --name wazuh-agent --restart unless-stopped \
   kennyopennix/wazuh-agent:latest
 Why 1514 here? Enrollment happens once via 1515/authd. This image enrolls via the API and configures the agent’s <server> block for 1514/remoted (runtime channel).
 
-Check logs:
+###Check logs:
 
+```bash
 docker logs -f --tail=200 wazuh-agent
+```
+
 Verify in the UI
 Endpoints → Agents should show zimaos-docker-agent as active.
-
-Optional screenshots (add these files or remove the lines):
 
 ## Verify in the UI
 
 Endpoints → **Agents** should show `zimaos-docker-agent` as **active**.
 
 ![Agents active](docs/img/agents-active.png.jpg)
-
 ![Alerts overview](docs/img/alerts-overview.png.jpg)
 
 ## Troubleshooting
